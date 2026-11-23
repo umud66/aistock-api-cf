@@ -1,0 +1,12 @@
+# Local emulation only. Never use this configuration for a cloud deployment.
+name = "aistock-extapi"
+main = "src/index.ts"
+compatibility_date = "2026-01-08"
+compatibility_flags = ["nodejs_compat"]
+
+[[kv_namespaces]]
+binding = "KV"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "aistock"

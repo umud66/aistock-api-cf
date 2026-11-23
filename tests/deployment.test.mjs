@@ -32,6 +32,14 @@ test('migration failure aborts without publishing a live Worker',async()=>{
     await assert.rejects(deployWithMigrations(['deploy'],run,{log:()=>{},writeConfig:async()=>'.tmp/config.json'}),/migration failed/);
     assert.equal(calls.filter(c=>c.args[0]==='deploy'&&!c.args.includes('--dry-run')).length,0);
 });
+test('Workers Builds publishes without management API discovery or D1 API access',async()=>{
+    const calls=[];
+    await deployWithMigrations(['deploy'],async args=>{calls.push(args);}, {
+        environment:{WORKERS_CI:'1'},log:()=>{},
+        writeConfig:()=>{throw new Error('Builds must not write a remote migration config');},
+    });
+    assert.deepEqual(calls,[['deploy']]);
+});
 test('dry run never discovers resources, authenticates, migrates or writes configuration',async()=>{
     for(const flag of ['--dry-run','--dry-run=true']){
         const {run,calls}=runner();

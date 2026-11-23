@@ -73,11 +73,17 @@ export async function migrationConfig(databaseId,root=process.cwd()) {
     return file;
 }
 
-/** Any failed step rejects; the live Worker is published only after migrations succeed. */
+/** Local CLI deployments migrate first; Workers Builds uses the runtime DB binding. */
 export async function deployWithMigrations(args,run,options={}) {
     if(isDryRun(args))return run(args);
     deploymentContext(args);
     const log=options.log??console.log;
+    if((options.environment??process.env).WORKERS_CI==='1') {
+        // Also support Builds configured with `npm run deploy`, not only native
+        // `wrangler deploy`. Never require management API permissions in Builds.
+        log('[BuildMigration] 通过现有 DB 绑定自动迁移；接口和定时任务会等待迁移完成。');
+        return run(args);
+    }
     log('1/4 检查 Worker 构建');
     await run([...args,'--dry-run']);
     log('2/4 检查 Cloudflare 认证并读取现有 DB 绑定');

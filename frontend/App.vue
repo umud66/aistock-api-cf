@@ -9,7 +9,7 @@ type View='overview'|'instruments'|'rules'|'notifications'|'settings'|'accounts'
 const ready=ref(false),role=ref<'admin'|'user'|null>(null),view=ref<View>('overview');
 const navOpen=ref(false),clock=ref(Date.now()),dark=ref(document.documentElement.dataset.theme==='dark');
 const authTab=ref<'login'|'register'|'admin'>('login'),authBusy=ref(false),authError=ref(''),authMessage=ref('');
-const registration=ref(false),configError=ref(false),username=ref(''),password=ref(''),passwordAgain=ref(''),nickname=ref(''),adminToken=ref('');
+const registration=ref(false),configError=ref(false),username=ref(''),password=ref(''),passwordAgain=ref(''),nickname=ref(''),adminPassword=ref('');
 const me=ref<Account|null>(null),instruments=ref<Instrument[]>([]),rules=ref<Rule[]>([]),events=ref<Notice[]>([]),accounts=ref<Account[]>([]);
 const status=ref<Status|null>(null),runtime=ref<Runtime|null>(null),loading=ref(false),loaded=ref(false),pageError=ref(''),pending=ref('');
 const search=ref(''),kindFilter=ref('all'),sort=ref('symbol'),ruleFilter=ref('all'),noticeFilter=ref('all'),eventPage=ref(1),hasNextEvents=ref(false);
@@ -75,7 +75,7 @@ async function boot(){
 async function auth(){
     authBusy.value=true;authError.value='';authMessage.value='';
     try{
-        if(authTab.value==='admin'){await api('/api/admin/login','POST',{token:adminToken.value});role.value='admin';}
+        if(authTab.value==='admin'){await api('/api/admin/login','POST',{password:adminPassword.value});role.value='admin';}
         else if(authTab.value==='register'){
             if(password.value!==passwordAgain.value)throw new Error('两次输入的密码不一致，请重新确认。');
             await api('/api/auth/register','POST',{username:username.value,password:password.value,nickname:nickname.value||undefined});
@@ -83,10 +83,10 @@ async function auth(){
         }else{me.value=await api<Account>('/api/auth/login','POST',{username:username.value,password:password.value});role.value='user';}
         password.value='';passwordAgain.value='';syncRoute();await reload();
     }catch(error){authError.value=errorText(error);if(error instanceof ApiError&&error.status===403)await loadConfig();}
-    finally{authBusy.value=false;adminToken.value='';}
+    finally{authBusy.value=false;adminPassword.value='';}
 }
 async function logout(){
-    pending.value='logout';try{await api(role.value==='admin'?'/api/admin/logout':'/api/auth/logout','POST',{});role.value=null;loaded.value=false;me.value=null;instruments.value=[];rules.value=[];events.value=[];password.value='';adminToken.value='';webhookToken.value='';webhookUrl.value='';userForm.value.password='';userForm.value.confirm='';await loadConfig();}catch(error){notify(errorText(error),true);}finally{pending.value='';}
+    pending.value='logout';try{await api(role.value==='admin'?'/api/admin/logout':'/api/auth/logout','POST',{});role.value=null;loaded.value=false;me.value=null;instruments.value=[];rules.value=[];events.value=[];password.value='';adminPassword.value='';webhookToken.value='';webhookUrl.value='';userForm.value.password='';userForm.value.confirm='';await loadConfig();}catch(error){notify(errorText(error),true);}finally{pending.value='';}
 }
 async function reload(background=false){
     if(!role.value)return;
@@ -189,7 +189,7 @@ onBeforeUnmount(()=>{clearTimeout(toastTimer);clearInterval(poll);window.removeE
             <label v-if="authTab==='register'">昵称 <span class="optional">选填</span><input v-model="nickname" maxlength="80" autocomplete="nickname" placeholder="你希望显示的名字"/></label>
             <label>密码<input v-model="password" type="password" :autocomplete="authTab==='register'?'new-password':'current-password'" required minlength="12" maxlength="128" placeholder="至少 12 个字符"/></label>
             <label v-if="authTab==='register'">确认密码<input v-model="passwordAgain" type="password" autocomplete="new-password" required minlength="12" maxlength="128" placeholder="再次输入密码"/></label></template>
-          <template v-else><label>管理员密钥<input v-model="adminToken" name="admin-key" type="password" autocomplete="off" required minlength="32" maxlength="512" placeholder="输入已配置的管理员密钥"/></label><p class="field-help">登录后使用安全会话，密钥不会保存到浏览器本地存储。</p></template>
+          <template v-else><label>管理员密码<input v-model="adminPassword" name="admin-password" type="password" autocomplete="current-password" required maxlength="128" placeholder="输入管理员密码"/></label><p class="field-help">登录会话有效期为 8 小时，密码不会保存到浏览器本地存储。</p></template>
           <p v-if="authError" class="form-error" role="alert"><Icon name="alert" :size="16"/>{{authError}}</p>
           <button class="button primary auth-submit" type="submit" :disabled="authBusy">{{authBusy?'正在验证…':authTab==='register'?'创建账号':'登录工作台'}}<Icon name="arrow" :size="18"/></button>
         </form>

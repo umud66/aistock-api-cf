@@ -32,7 +32,7 @@ async function bodyOf(request: Request): Promise<Record<string, unknown>> {
 
 export class MonitorController {
     static async handle(request: Request, env: MonitorEnv): Promise<Response> {
-        if (!await isAdmin(request, env)) return createResponse(401, '需要有效的管理员 Bearer Token（至少 32 字符）');
+        if (!await isAdmin(request, env)) return createResponse(401, '请先登录管理员账号');
         const path = new URL(request.url).pathname.replace(/\/$/, '');
         const repository = new MonitorRepository(env.DB);
         let lockOwner: string | null = null;

@@ -1,6 +1,7 @@
 export interface MonitorEnv {
     DB: D1Database;
-    MONITOR_ADMIN_TOKEN?: string;
+    KV?: KVNamespace;
+    ADMIN_PASSWORD?: string;
     MONITOR_ENABLED?: string;
     MONITOR_WEBHOOK_URL?: string;
     MONITOR_WEBHOOK_TOKEN?: string;

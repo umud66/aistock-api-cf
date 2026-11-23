@@ -14,6 +14,7 @@ export * from './src/controllers/MonitorController';
 export * from './src/utils/stock';
 export * from './src/utils/throttle';
 export * from './src/services/CacheService';
+export * from './src/auth/security';
 `, resolveDir: process.cwd(), loader: 'ts' }, bundle:true, write:false, format:'esm', platform:'browser', target:'es2022' });
 const api = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString('base64')}`);
 const now = new Date('2026-11-23T02:00:00Z').getTime();
@@ -25,7 +26,7 @@ function database() {
     sqlite.exec('PRAGMA foreign_keys=ON');
     sqlite.function('unixepoch', () => Math.floor(now/1000));
     // Apply twice to verify idempotent startup.
-    for(let i=0;i<2;i++) sqlite.exec(readFileSync('scripts/monitoring.sql','utf8'));
+    for(let i=0;i<2;i++) for(const file of ['users-schema.sql','accounts.sql','monitoring.sql']) sqlite.exec(readFileSync('scripts/'+file,'utf8'));
     const db = {
         prepare(sql) {
             let values=[];
@@ -128,8 +129,9 @@ test('webhook blocks local hosts, IPs, credentials, non-TLS and special ports',(
     assert.equal(api.validateWebhookUrl('https://hooks.company.com/path').hostname,'hooks.company.com');
 });
 test('management API requires admin auth, validates input and supports ETF rule CRUD',async()=>{
-    const {db,sqlite}=database();const token='a'.repeat(32);const env={DB:db,MONITOR_ADMIN_TOKEN:token};
-    const request=(path,method='GET',body)=>new Request('https://worker.test/api/monitor/'+path,{method,headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});
+    const {db,sqlite}=database();const token='a'.repeat(64);const env={DB:db,ADMIN_PASSWORD:'normal-password'};
+    sqlite.prepare('INSERT INTO admin_sessions(token_hash,credential_hash,expires_at) VALUES(?,?,?)').run(await api.digest(token),await api.adminCredentialHash(env.ADMIN_PASSWORD,token),Date.now()+3600000);
+    const request=(path,method='GET',body)=>new Request('https://worker.test/api/monitor/'+path,{method,headers:{Cookie:'__Host-stockwatch_admin='+token,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{})});
     assert.equal((await api.MonitorController.handle(new Request('https://worker.test/api/monitor/rules'),env)).status,401);
     assert.equal((await api.MonitorController.handle(request('instruments','POST',{symbol:'159915',market:'SH',kind:'etf'}),env)).status,400);
     const result=await api.MonitorController.handle(request('rules','POST',{symbol:'159915',market:'SZ',metric:'price',operator:'cross_above',threshold:2}),env);

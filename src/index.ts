@@ -47,6 +47,7 @@ export interface Env extends MonitorEnv {
     KV: KVNamespace;
     DB: D1Database;
     AUTH_PASSWORD_PEPPER?: string;
+    ADMIN_PASSWORD?: string;
     FRONTEND_URL: string;
     CORS_ALLOW_ORIGIN: string;
     OPENAI_API_BASE_URL: string;

@@ -16,7 +16,7 @@ test('desktop and mobile complete real Workers UI workflows', {timeout:180000},a
         await page.goto(preview.url);await expect(page.getByRole('heading',{name:'欢迎回来'})).toBeVisible();
         await page.screenshot({path:'.tmp/screenshots/login-desktop.png',fullPage:true});
         await page.getByRole('button',{name:'管理员入口',exact:true}).click();
-        await page.getByLabel('管理员密钥',{exact:true}).fill(preview.adminKey);
+        await page.getByLabel('管理员密码',{exact:true}).fill(preview.adminPassword);
         await page.getByRole('button',{name:'登录工作台',exact:true}).click();
         await expect(page.getByRole('heading',{name:'行情总览',level:1})).toBeVisible();
         await page.reload();await expect(page.getByRole('heading',{name:'行情总览',level:1})).toBeVisible();

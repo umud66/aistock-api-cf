@@ -1,6 +1,7 @@
 import { AccountRepository } from '../auth/AccountRepository';
 import { hashPassword, verifyPassword } from '../auth/password';
-import { authenticatedUser, digest, isAdmin, ADMIN_COOKIE, SESSION_COOKIE, sessionToken, trustedOrigin } from '../auth/security';
+import { authenticatedUser, digest, adminCredentialHash, isAdmin, ADMIN_COOKIE, SESSION_COOKIE, sessionToken, trustedOrigin } from '../auth/security';
+import { applicationSecret } from '../auth/applicationSecret';
 import { publicRuntime, saveRuntime } from '../monitoring/RuntimeSettings';
 import type { AccountEnv } from '../auth/security';
 import { createResponse } from '../utils/response';
@@ -40,9 +41,9 @@ function credentials(body: Record<string, unknown>) {
     requireValue(body.nickname===undefined || typeof body.nickname==='string' && body.nickname.length<=80,'昵称最长 80 字符');
     return {username:body.username.toLowerCase(),password:body.password,nickname:String(body.nickname ?? body.username)};
 }
-function pepper(env: AccountEnv): string {
-    if (!env.AUTH_PASSWORD_PEPPER || env.AUTH_PASSWORD_PEPPER.length<32) throw new AccountError(503,'账号服务尚未配置 AUTH_PASSWORD_PEPPER Secret');
-    return env.AUTH_PASSWORD_PEPPER;
+async function pepper(env: AccountEnv): Promise<string> {
+    try{return await applicationSecret(env);}
+    catch(error){throw new AccountError(503,error instanceof Error?error.message:'内部加密服务暂不可用');}
 }
 function withCookie(response: Response, token: string, maxAge: number, name = SESSION_COOKIE): Response {
     const headers=new Headers(response.headers);
@@ -69,14 +70,17 @@ export class AccountController {
                 const client=await digest(request.headers.get('CF-Connecting-IP') ?? 'local');
                 if(!await repository.consumeLimit(`admin:ip:${client}`,10)) return createResponse(429,'尝试次数过多，请在 15 分钟后重试');
                 const input=await bodyOf(request);
-                if(typeof input.token!=='string' || input.token.length>512) return createResponse(401,'管理员密钥不正确');
-                const headers=new Headers(request.headers);headers.set('Authorization',`Bearer ${input.token}`);
-                if(!await isAdmin(new Request(request.url,{method:request.method,headers}),env)) return createResponse(401,'管理员密钥不正确');
+                if(!env.ADMIN_PASSWORD)return createResponse(503,'请先在 Cloudflare Secrets 中配置管理员密码 ADMIN_PASSWORD');
+                if(typeof input.password!=='string'||input.password.length>128)return createResponse(401,'管理员密码不正确');
+                const expected=await digest(env.ADMIN_PASSWORD),provided=await digest(input.password);
+                let difference=0;
+                for(let i=0;i<expected.length;i++)difference|=expected.charCodeAt(i)^provided.charCodeAt(i);
+                if(difference!==0)return createResponse(401,'管理员密码不正确');
                 const raw=Array.from(crypto.getRandomValues(new Uint8Array(32)),v=>v.toString(16).padStart(2,'0')).join('');
                 await env.DB.batch([
                     env.DB.prepare('DELETE FROM admin_sessions WHERE expires_at<=?').bind(Date.now()),
                     env.DB.prepare('INSERT INTO admin_sessions(token_hash,credential_hash,expires_at) VALUES(?,?,?)')
-                        .bind(await digest(raw),await digest(env.MONITOR_ADMIN_TOKEN!),Date.now()+8*3600_000),
+                        .bind(await digest(raw),await adminCredentialHash(env.ADMIN_PASSWORD,raw),Date.now()+8*3600_000),
                 ]);
                 return withCookie(createResponse(200,'管理员登录成功',{role:'admin'}),raw,8*3600,ADMIN_COOKIE);
             }
@@ -118,7 +122,7 @@ export class AccountController {
             if(registering || creating || loggingIn) {
                 if(request.method!=='POST') return createResponse(405,'仅支持 POST');
                 if(registering && !(await repository.settings()).allow_registration) return createResponse(403,'管理员已关闭注册');
-                const secret=pepper(env);
+                const secret=await pepper(env);
                 const input=credentials(await bodyOf(request));
                 if(!creating) {
                     const client=await digest(request.headers.get('CF-Connecting-IP') ?? 'local');

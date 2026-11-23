@@ -27,3 +27,7 @@ CREATE TABLE IF NOT EXISTS admin_sessions (
     expires_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_admin_sessions_expires ON admin_sessions(expires_at);
+CREATE TABLE IF NOT EXISTS application_crypto_config (
+    id INTEGER PRIMARY KEY CHECK(id=1),
+    key_id TEXT NOT NULL UNIQUE
+);

@@ -4,9 +4,9 @@ import { readFileSync } from 'node:fs';
 import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
 
-const admin='test-admin-'.repeat(5), pepper='test-pepper-'.repeat(5);
+const adminPassword='Adm1n!pw';
 const password='test-only-password-123';
-let mf, worker, db, AccountRepository;
+let mf, worker, db, AccountRepository, cryptoApi, adminCookie;
 before(async()=>{
     const built=await build({stdin:{resolveDir:process.cwd(),loader:'ts',contents:`
 import {AccountController} from './src/controllers/AccountController';
@@ -20,23 +20,29 @@ export default {async fetch(request,env) {
  return new Response('Not Found',{status:404});
 }};`},bundle:true,write:false,format:'esm',platform:'browser'});
     mf=new Miniflare({modules:true,script:built.outputFiles[0].text,d1Databases:['DB'],
-        bindings:{MONITOR_ADMIN_TOKEN:admin,AUTH_PASSWORD_PEPPER:pepper},compatibilityDate:'2026-01-08'});
+        kvNamespaces:['KV'],bindings:{ADMIN_PASSWORD:adminPassword},compatibilityDate:'2026-01-08'});
     db=await mf.getD1Database('DB');worker=await mf.getWorker();
     for(const file of ['users-schema.sql','user_settings.sql','accounts.sql','monitoring.sql']) {
         const sql=readFileSync('scripts/'+file,'utf8').replace(/^--.*$/gm,'').split(';').map(s=>s.trim()).filter(Boolean);
         for(let i=0;i<2;i++) await db.batch(sql.map(s=>db.prepare(s)));
     }
     await db.prepare('CREATE TABLE stocks(symbol TEXT PRIMARY KEY,name TEXT,market TEXT)').run();
+    const helpers=await build({stdin:{contents: `export * from './src/auth/applicationSecret';export * from './src/controllers/AccountController';export * from './src/monitoring/RuntimeSettings';export * from './src/auth/security';`,resolveDir:process.cwd(),loader:'ts'},bundle:true,write:false,format:'esm',platform:'browser'});
+    cryptoApi=await import(`data:text/javascript;base64,${Buffer.from(helpers.outputFiles[0].text).toString('base64')}`);
     const repo=await build({entryPoints:['src/auth/AccountRepository.ts'],bundle:true,write:false,format:'esm',platform:'browser'});
     ({AccountRepository}=await import(`data:text/javascript;base64,${Buffer.from(repo.outputFiles[0].text).toString('base64')}`));
 });
 beforeEach(async()=>{
-    await db.batch(['DELETE FROM users','DELETE FROM auth_rate_limits','DELETE FROM admin_sessions','DELETE FROM monitor_settings',"UPDATE system_settings SET allow_registration=0,updated_at=0"].map(s=>db.prepare(s)));
+    adminCookie=undefined;
+    await db.batch(['DELETE FROM users','DELETE FROM auth_rate_limits','DELETE FROM admin_sessions','DELETE FROM monitor_settings','DELETE FROM application_crypto_config',"UPDATE system_settings SET allow_registration=0,updated_at=0"].map(s=>db.prepare(s)));
 });
 after(async()=>{await mf?.dispose();});
-function request(path,method='GET',body,options={}) {
+async function request(path,method='GET',body,options={}) {
     const headers={'Content-Type':'application/json',...options.headers};
-    if(options.admin) headers.Authorization='Bearer '+admin;
+    if(options.admin){
+        if(!adminCookie){const response=await worker.fetch('https://app.stockwatch.test/api/admin/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:adminPassword})});assert.equal(response.status,200);adminCookie=response.headers.get('Set-Cookie').split(';')[0];}
+        headers.Cookie=adminCookie;
+    }
     if(options.cookie) headers.Cookie=options.cookie;
     return worker.fetch('https://app.stockwatch.test'+path,{method,headers,...(body===undefined?{}:{body:JSON.stringify(body)})});
 }
@@ -143,9 +149,9 @@ test('login throttles atomically by account even when source IP changes',async()
     await db.prepare('UPDATE auth_rate_limits SET window_start=0').run();
     assert.equal((await login()).response.status,200);
 });
-test('browser admin login exchanges the secret for a revocable HttpOnly session',async()=>{
-    assert.equal((await request('/api/admin/login','POST',{token:'wrong'})).status,401);
-    const response=await request('/api/admin/login','POST',{token:admin});
+test('an eight-character admin password works with only ADMIN_PASSWORD configured',async()=>{
+    assert.equal((await request('/api/admin/login','POST',{password:'wrong'})).status,401);
+    const response=await request('/api/admin/login','POST',{password:adminPassword});
     assert.equal(response.status,200);
     const setCookie=response.headers.get('Set-Cookie');assert.ok(setCookie.includes('__Host-stockwatch_admin='));
     assert.ok(setCookie.includes('HttpOnly'));assert.ok(setCookie.includes('Secure'));
@@ -153,7 +159,8 @@ test('browser admin login exchanges the secret for a revocable HttpOnly session'
     assert.equal((await request('/api/admin/settings','PUT',{allow_registration:true},{cookie})).status,200);
     assert.equal((await request('/api/admin/settings','PUT',{allow_registration:false},{cookie,headers:{Origin:'https://evil.test'}})).status,403);
     const stored=await db.prepare('SELECT * FROM admin_sessions').first();
-    assert.ok(!JSON.stringify(stored).includes(admin));assert.notEqual(stored.token_hash,cookie.split('=')[1]);
+    assert.ok(!JSON.stringify(stored).includes(adminPassword));assert.notEqual(stored.token_hash,cookie.split('=')[1]);
+    assert.notEqual(stored.credential_hash,await cryptoApi.digest(adminPassword));
     assert.equal((await request('/api/admin/logout','POST',{}, {cookie})).status,200);
     assert.equal((await request('/api/admin/me','GET',undefined,{cookie})).status,401);
 });
@@ -167,4 +174,37 @@ test('runtime settings are editable in the UI API and webhook secrets stay encry
     assert.equal((await request('/api/admin/runtime','PUT',{webhook_url:'http://127.0.0.1'},{admin:true})).status,400);
     const read=(await (await request('/api/admin/runtime','GET',undefined,{admin:true})).json()).data;
     assert.equal(read.webhook_token_configured,true);assert.equal(read.monitor_enabled,true);
+});
+test('changing the administrator password revokes admin sessions without breaking user passwords or encrypted settings',async()=>{
+    await create('stableuser');
+    await request('/api/admin/runtime','PUT',{webhook_url:'https://hooks.company.com/stable',webhook_token:'stable-token'},{admin:true});
+    const oldCookie=adminCookie;
+    const rotated={DB:db,KV:await mf.getKVNamespace('KV'),ADMIN_PASSWORD:'new-pass'};
+    const req=(path,method='GET',body,cookie)=>new Request('https://app.stockwatch.test'+path,{method,
+        headers:{'Content-Type':'application/json',...(cookie?{Cookie:cookie}:{})},...(body?{body:JSON.stringify(body)}:{})});
+    assert.equal((await cryptoApi.AccountController.handle(req('/api/admin/me','GET',undefined,oldCookie),rotated)).status,401);
+    assert.equal((await cryptoApi.AccountController.handle(req('/api/admin/login','POST',{password:adminPassword}),rotated)).status,401);
+    const adminResponse=await cryptoApi.AccountController.handle(req('/api/admin/login','POST',{password:'new-pass'}),rotated);
+    assert.equal(adminResponse.status,200);
+    const newCookie=adminResponse.headers.get('Set-Cookie').split(';')[0];
+    assert.equal((await cryptoApi.AccountController.handle(req('/api/admin/runtime','GET',undefined,newCookie),rotated)).status,200);
+    assert.equal((await cryptoApi.AccountController.handle(req('/api/auth/login','POST',{username:'stableuser',password}),rotated)).status,200);
+    const current=await cryptoApi.runtimeEnv(rotated);assert.equal(current.MONITOR_WEBHOOK_TOKEN,'stable-token');
+    assert.equal(rotated.AUTH_PASSWORD_PEPPER,undefined);
+});
+test('legacy Bearer tokens cannot administer the application or log into the website',async()=>{
+    assert.equal((await request('/api/admin/settings','GET',undefined,{headers:{Authorization:'Bearer '+'a'.repeat(32)}})).status,401);
+    assert.equal((await request('/api/admin/login','POST',{token:'a'.repeat(32)})).status,401);
+});
+test('application encryption keys are generated once, stored outside D1, and safely import an old pepper',async()=>{
+    const env={DB:db,KV:await mf.getKVNamespace('KV'),ADMIN_PASSWORD:adminPassword};
+    const first=await cryptoApi.applicationSecret(env),second=await cryptoApi.applicationSecret(env);
+    assert.equal(first,second);
+    const pointer=await db.prepare('SELECT * FROM application_crypto_config').first();
+    assert.ok(pointer.key_id);assert.ok(!JSON.stringify(pointer).includes(first));
+    assert.equal(await env.KV.get('stockwatch:application-key:v1:'+pointer.key_id),first);
+    await db.prepare('DELETE FROM application_crypto_config').run();
+    const previous='test-only-legacy-encryption-key';
+    assert.equal(await cryptoApi.applicationSecret({...env,AUTH_PASSWORD_PEPPER:previous}),previous);
+    assert.equal(await cryptoApi.applicationSecret(env),previous);
 });

@@ -1,9 +1,9 @@
 import type { MonitorEnv } from './types';
 import { validateWebhookUrl } from './Webhook';
+import { applicationSecret } from '../auth/applicationSecret';
 
 async function key(env: MonitorEnv): Promise<CryptoKey> {
-    if (!env.AUTH_PASSWORD_PEPPER || env.AUTH_PASSWORD_PEPPER.length < 32) throw new Error('请先配置账号加密密钥');
-    const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`stockwatch:settings:${env.AUTH_PASSWORD_PEPPER}`));
+    const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`stockwatch:settings:${await applicationSecret(env)}`));
     return crypto.subtle.importKey('raw', bytes, 'AES-GCM', false, ['encrypt','decrypt']);
 }
 async function seal(value: string, env: MonitorEnv): Promise<string> {

@@ -5,11 +5,11 @@ import { randomBytes } from 'node:crypto';
 
 /** Isolated integration fixture: no production bindings, credentials, or market data. */
 export async function createPreview() {
-    const adminKey=randomBytes(32).toString('hex');
+    const adminPassword=randomBytes(8).toString('base64url');
     const mf=new Miniflare({port:0,host:'127.0.0.1',modules:true,scriptPath:resolve('.tmp/build/index.js'),
         compatibilityDate:'2026-01-08',compatibilityFlags:['nodejs_compat'],
         log:new Log(LogLevel.ERROR),d1Databases:['DB'],kvNamespaces:['KV'],
-        bindings:{MONITOR_ADMIN_TOKEN:adminKey,AUTH_PASSWORD_PEPPER:randomBytes(32).toString('hex'),MONITOR_ENABLED:'false'},
+        bindings:{ADMIN_PASSWORD:adminPassword,MONITOR_ENABLED:'false'},
         assets:{directory:resolve('.tmp/web-dist'),binding:'ASSETS',routerConfig:{has_user_worker:true,invoke_user_worker_ahead_of_assets:true},assetConfig:{not_found_handling:'single-page-application'}},
         outboundService:async request=>{
             const url=new URL(request.url);
@@ -28,6 +28,6 @@ export async function createPreview() {
         }
         await db.prepare('CREATE TABLE stocks(symbol TEXT PRIMARY KEY,name TEXT,pinyin TEXT,market TEXT)').run();
         const url=(await mf.ready).toString();
-        return {mf,db,url,adminKey};
+        return {mf,db,url,adminPassword};
     }catch(error){await mf.dispose();throw error;}
 }

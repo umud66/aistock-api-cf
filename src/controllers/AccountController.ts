@@ -37,7 +37,7 @@ async function bodyOf(request: Request): Promise<Record<string, unknown>> {
 }
 function credentials(body: Record<string, unknown>) {
     requireValue(typeof body.username==='string' && /^[A-Za-z0-9][A-Za-z0-9_.-]{2,31}$/.test(body.username),'用户名需要 3–32 位字母、数字、点、横线或下划线');
-    requireValue(typeof body.password==='string' && body.password.length>=12 && body.password.length<=128,'密码需要 12–128 个字符');
+    requireValue(typeof body.password==='string' && body.password.length>=4 && body.password.length<=128,'密码需要 4–128 个字符');
     requireValue(body.nickname===undefined || typeof body.nickname==='string' && body.nickname.length<=80,'昵称最长 80 字符');
     return {username:body.username.toLowerCase(),password:body.password,nickname:String(body.nickname ?? body.username)};
 }

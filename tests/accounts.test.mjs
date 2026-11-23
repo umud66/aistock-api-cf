@@ -136,7 +136,7 @@ test('cross-origin writes, malformed JSON and wrong HTTP methods are rejected',a
     assert.equal((await request('/api/admin/settings','PUT',{allow_registration:true},{admin:true,headers:{Origin:'https://evil.test'}})).status,403);
     assert.equal((await request('/api/auth/login','GET')).status,405);
     await allow();
-    for(const input of [{username:'a',password},{username:'tester',password:'short'},{username:'tester',password:'x'.repeat(129)}])
+    for(const input of [{username:'a',password},{username:'tester',password:'abc'},{username:'tester',password:'x'.repeat(129)}])
         assert.equal((await request('/api/auth/register','POST',input)).status,400);
     assert.equal((await worker.fetch('https://app.stockwatch.test/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:'{bad'})).status,400);
     assert.equal((await worker.fetch('https://app.stockwatch.test/api/auth/register',{method:'POST',headers:{'Content-Type':'application/json'},body:'x'.repeat(9000)})).status,413);

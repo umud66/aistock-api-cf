@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { spawn } from 'node:child_process';
-import { deployWithMigrations,deploymentContext } from './deployment.mjs';
+import { deployWithMigrations,deploymentContext,migrateBoundDatabase } from './deployment.mjs';
 
 const runtime = resolve('.tmp/runtime');
 mkdirSync(runtime, { recursive: true });
@@ -37,6 +37,7 @@ function runWrangler(command,options={}) {
 }
 try {
     if(args[0]==='deploy') await deployWithMigrations(args,runWrangler);
+    else if(args[0]==='migrate') await migrateBoundDatabase(['deploy',...args.slice(1)],runWrangler);
     else {
         if(args[0]==='dev'&&!args.includes('--remote')) {
             const persistIndex=args.indexOf('--persist-to');

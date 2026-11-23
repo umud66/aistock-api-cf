@@ -6,6 +6,9 @@ compatibility_flags = ["nodejs_compat"]
 # Runtime variables and resources are managed in the Cloudflare dashboard.
 keep_vars = true
 
+[build]
+command = "node scripts/generate-migrations.mjs"
+
 # Wrangler's upload metadata preserves existing resources by binding type.
 # Include variables and secrets because this overrides the generated keep_bindings.
 [unsafe.metadata]

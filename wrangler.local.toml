@@ -4,6 +4,9 @@ main = "src/index.ts"
 compatibility_date = "2026-01-08"
 compatibility_flags = ["nodejs_compat"]
 
+[build]
+command = "node scripts/generate-migrations.mjs"
+
 [[kv_namespaces]]
 binding = "KV"
 

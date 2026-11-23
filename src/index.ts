@@ -1,4 +1,5 @@
 import { MonitorController } from './controllers/MonitorController';
+import { ensureSchema, SchemaMigrationError } from './db/schema';
 import { runMonitor } from './monitoring/MonitorService';
 import type { MonitorEnv } from './monitoring/types';
 import { ProfitForecastController } from './controllers/ProfitForecastController';
@@ -380,6 +381,7 @@ export default {
                 }
                 return new Response(asset.body,{status:asset.status,headers});
             }
+            await ensureSchema(env.DB);
             if (pathname.startsWith("/api/auth/") || pathname.startsWith("/api/admin/")) {
                 return withCors(await AccountController.handle(request, env), request, env);
             }
@@ -447,10 +449,17 @@ export default {
 
             return withCors(createResponse(404, 'Not Found'), request, env);
         } catch (err: any) {
+            if (err instanceof SchemaMigrationError) return withCors(createResponse(503, err.message), request, env);
             return withCors(createResponse(500, err instanceof Error ? err.message : 'Internal Server Error'), request, env);
         }
     },
     async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+        try {
+            await ensureSchema(env.DB);
+        } catch (error) {
+            console.error('[Cron][SchemaMigration]', error instanceof Error ? error.message : '数据库初始化失败');
+            return;
+        }
         if (event.cron === HOT_STOCKS_CRON_EXPRESSION) {
             ctx.waitUntil((async () => {
                 try {

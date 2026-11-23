@@ -1,5 +1,6 @@
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { generateMigrations } from '../scripts/generate-migrations.mjs';
 
 const runtime = resolve('.tmp/runtime');
 mkdirSync(runtime, { recursive: true });
@@ -8,3 +9,4 @@ process.env.TMP = runtime;
 process.env.TEMP = runtime;
 process.env.WRANGLER_LOG_PATH = resolve('.tmp/wrangler.log');
 process.env.PLAYWRIGHT_BROWSERS_PATH = resolve('.tmp/playwright-browsers');
+await generateMigrations();

@@ -81,12 +81,16 @@ export async function deployWithMigrations(args,run,options={}) {
     log('1/4 检查 Worker 构建');
     await run([...args,'--dry-run']);
     log('2/4 检查 Cloudflare 认证并读取现有 DB 绑定');
+    await migrateBoundDatabase(args,run,options);
+    log('4/4 发布 Worker 和前端页面');
+    return run(args);
+}
+
+export async function migrateBoundDatabase(args,run,options={}) {
     const auth=await run(['whoami',...deploymentContext(args).global],{capture:true});
     if(/not (?:authenticated|logged in)/i.test(auth))throw new Error('尚未登录 Cloudflare，请先运行 Wrangler login 或设置部署用 API Token。');
     const databaseId=await boundDatabase(args,run);
     const config=await (options.writeConfig??migrationConfig)(databaseId);
-    log('3/4 自动应用未执行的数据库迁移');
+    (options.log??console.log)('自动应用未执行的数据库迁移');
     await run(['d1','migrations','apply','DB','--remote','--config',config],{nonInteractive:true});
-    log('4/4 发布 Worker 和前端页面');
-    return run(args);
 }

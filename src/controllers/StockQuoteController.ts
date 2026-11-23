@@ -102,6 +102,7 @@ export class StockQuoteController {
         try {
             const cached = await cacheService.get<StockInfoCachePayload>(cacheKey);
             if (!isValidStockInfoCachePayload(cached)) return null;
+            if (level === 'core' && Date.now() - cached.timestamp > 30_000) return null;
             return cached.data;
         } catch (err) {
             console.error(`Error reading stock quote cache ${cacheKey}:`, err);

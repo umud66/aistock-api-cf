@@ -1,3 +1,6 @@
+import { MonitorController } from './controllers/MonitorController';
+import { runMonitor } from './monitoring/MonitorService';
+import type { MonitorEnv } from './monitoring/types';
 import { ProfitForecastController } from './controllers/ProfitForecastController';
 import { StockInfoController } from './controllers/StockInfoController';
 import { StockQuoteController } from './controllers/StockQuoteController';
@@ -6,10 +9,8 @@ import { StockListController } from './controllers/StockListController';
 import { IndexQuoteController } from './controllers/IndexQuoteController';
 import { TagLeaderController } from './controllers/TagLeaderController';
 import { NewsController } from './controllers/NewsController';
-import { AuthController } from './controllers/AuthController';
+import { AccountController } from './controllers/AccountController';
 import { UserController } from './controllers/UserController';
-import { WechatEventController } from './controllers/WechatEventController';
-import { ScanLoginController } from './controllers/ScanLoginController';
 import { StockAnalysisController } from './controllers/StockAnalysisController';
 import { StockOcrController } from './controllers/StockOcrController';
 import { EmService } from './services/EmInfoService';
@@ -41,15 +42,11 @@ import { isAShareTradingTime } from './utils/tradingTime';
  * - utils/          通用工具（响应、校验、解析、日期）
  */
 
-export interface Env {
+export interface Env extends MonitorEnv {
     KV: KVNamespace;
     DB: D1Database;
-    WECHAT_APPID: string;
-    WECHAT_SECRET: string;
-    JWT_SECRET: string;
-    WECHAT_TOKEN: string;
+    AUTH_PASSWORD_PEPPER?: string;
     FRONTEND_URL: string;
-    COOKIE_DOMAIN: string;
     CORS_ALLOW_ORIGIN: string;
     OPENAI_API_BASE_URL: string;
     OPENAI_API_KEY: string;
@@ -87,12 +84,6 @@ const simpleRoutes: [string, SimpleRouteHandler][] = [
 ];
 
 const queryRoutes: [string, QueryRouteHandler][] = [
-    ['/api/auth/wechat/login', AuthController.login.bind(AuthController)],
-    ['/api/auth/wechat/callback', AuthController.callback.bind(AuthController)],
-    ['/api/auth/wechat/push', WechatEventController.handle.bind(WechatEventController)],
-    ['/api/auth/wechat/login/scan', ScanLoginController.generateQrCode.bind(ScanLoginController)],
-    ['/api/auth/wechat/login/scan/poll', ScanLoginController.poll.bind(ScanLoginController)],
-    ['/api/auth/logout', AuthController.logout.bind(AuthController)],
     ['/api/users/me', UserController.me.bind(UserController)],
     ['/api/users/me/settings', UserController.getSettings.bind(UserController)],
     ['/api/users/me/news/push', UserController.getPushNews.bind(UserController)],
@@ -128,7 +119,7 @@ const settingQueryRoutes: [RegExp, SettingQueryRouteHandler][] = [
 ];
 
 const HOT_STOCKS_CRON_EXPRESSION = '*/30 * * * *';
-const HOT_STOCK_INFO_WARMUP_CRON_EXPRESSION = '*/5 * * * *';
+const HOT_STOCK_INFO_WARMUP_CRON_EXPRESSION = '* * * * *';
 const HOT_STOCK_INFO_WARMUP_CONCURRENCY = 6;
 const FAVORITES_ANALYSIS_REFRESH_CRON_EXPRESSIONS = new Set([
     '30 1 * * 1-5', // UTC -> 北京时间 09:30
@@ -374,6 +365,12 @@ export default {
         try {
             const url = new URL(request.url);
             const { pathname } = url;
+            if (pathname.startsWith("/api/auth/") || pathname.startsWith("/api/admin/")) {
+                return withCors(await AccountController.handle(request, env), request, env);
+            }
+            if (pathname === "/api/monitor" || pathname.startsWith("/api/monitor/")) {
+                return withCors(await MonitorController.handle(request, env), request, env);
+            }
 
             // 无参数路由
             for (const [prefix, handler] of simpleRoutes) {
@@ -433,7 +430,7 @@ export default {
                 }
             }
 
-            return withCors(createResponse(404, 'Not Found - 可用接口: /api/auth/wechat/login, /api/auth/wechat/login/scan, /api/auth/wechat/login/scan/poll, /api/auth/wechat/callback, /api/auth/wechat/push, /api/auth/logout, /api/users/me, /api/users/me/settings, /api/users/me/settings/:settingType, /api/users/me/news/push, /api/users/me/favorites, /api/users/me/favorites/delete, /api/cn/stocks, /api/cn/stocks/profit-forecast, /api/cn/stocks/profit-forecast/search, /api/cn/stocks/ocr, /api/cn/stocks/:symbol/news, /api/cn/stocks/:symbol/analysis, /api/cn/stocks/:symbol/analysis/history, /api/cn/stock/:symbol/profit-forecast, /api/cn/stock/infos, /api/cn/stock/quotes/core, /api/cn/stock/quotes/activity, /api/cn/stock/quotes/kline, /api/cn/stock/fundamentals, /api/cn/market/stockrank, /api/cn/tags/:tagCode/leaders, /api/cn/index/quotes, /api/gb/index/quotes, /api/news/headlines, /api/news/cn, /api/news/hk, /api/news/gb, /api/news/fund, /api/news/:id'), request, env);
+            return withCors(createResponse(404, 'Not Found'), request, env);
         } catch (err: any) {
             return withCors(createResponse(500, err instanceof Error ? err.message : 'Internal Server Error'), request, env);
         }
@@ -453,7 +450,10 @@ export default {
         if (event.cron === HOT_STOCK_INFO_WARMUP_CRON_EXPRESSION) {
             ctx.waitUntil((async () => {
                 try {
-                    await warmupHotStockInfos(env);
+                    await runMonitor(env);
+                    if (new Date(event.scheduledTime).getUTCMinutes() % 5 === 0) {
+                        await warmupHotStockInfos(env);
+                    }
                 } catch (err) {
                     console.error('[Cron][HotStockInfoWarmup] failed:', err);
                 }

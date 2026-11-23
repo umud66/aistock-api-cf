@@ -4,11 +4,8 @@ compatibility_date = "2026-01-08"
 compatibility_flags = ["nodejs_compat"]
 
 [vars]
-# 微信公众号 AppID
-WECHAT_APPID = "wx61330ef0702949b8"
-# 前端首页地址（登录成功后跳转）
+# 前端来源（用于 CORS 和请求来源校验）
 FRONTEND_URL = "https://aistocklink.cn"
-COOKIE_DOMAIN = "aistocklink.cn"
 CORS_ALLOW_ORIGIN = "https://aistocklink.cn"
 
 # 大模型评价接口地址
@@ -17,13 +14,16 @@ EVA_MODEL = "openai-large"
 OCR_MODEL = "openai"
 
 # 定时任务相关设置
+MONITOR_ENABLED = "false"
 CRON_HOT_TOPN = "8"
 CRON_ANALYSIS_CONCURRENCY = "2"
 
 # 敏感信息请通过 wrangler secret put 设置:
-#   wrangler secret put WECHAT_SECRET
-#   wrangler secret put JWT_SECRET
 #   wrangler secret put OPENAI_API_KEY
+#   wrangler secret put AUTH_PASSWORD_PEPPER (at least 32 characters)
+#   wrangler secret put MONITOR_ADMIN_TOKEN (at least 32 characters)
+#   wrangler secret put MONITOR_WEBHOOK_URL
+#   wrangler secret put MONITOR_WEBHOOK_TOKEN (optional)
 
 # KV Namespace binding
 [[kv_namespaces]]
@@ -39,7 +39,7 @@ database_id = "f6efa1f1-4414-491c-a5d6-809fb1adfb8d" # 运行 wrangler d1 create
 [triggers]
 crons = [
   "*/30 * * * *",
-  "*/5 * * * *",
+  "* * * * *",
   "30 1 * * 1-5", # UTC -> 北京时间 09:30
   "0 5 * * 1-5",  # UTC -> 北京时间 13:00
   "0 7 * * 1-5"   # UTC -> 北京时间 15:00

@@ -12,14 +12,15 @@ fi
 
 SQL_FILES=(
     "./scripts/stocks.sql"
-    "./scripts/users.sql"
+    "./scripts/users-schema.sql"
     "./scripts/user_settings.sql"
-    "./scripts/scan_login.sql"
+    "./scripts/accounts.sql"
     "./scripts/tags.sql"
     "./scripts/news_tags.sql"
     "./scripts/stock_tags.sql"
     "./scripts/earnings_forecast.sql"
     "./scripts/stock_analysis.sql"
+    "./scripts/monitoring.sql"
 )
 
 echo "=== Cloudflare D1 数据库初始化 ==="
@@ -55,7 +56,7 @@ FROM sqlite_master
 WHERE type='table'
   AND name IN (
     'stocks', 'users', 'user_stocks', 'user_settings',
-    'scan_login_states', 'tags', 'news_tags',
+    'account_credentials', 'account_sessions', 'system_settings', 'tags', 'news_tags',
     'earnings_forecast', 'stock_analysis'
   )
 ORDER BY name;"

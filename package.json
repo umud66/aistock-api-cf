@@ -4,9 +4,14 @@
   "description": "A股数据 API - Cloudflare Workers",
   "main": "src/index.ts",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "node --import ./tests/setup.mjs --test tests/*.test.mjs",
     "build": "echo 'Building not required for interpretion, but verifying types...' && tsc",
-    "deploy": "wrangler deploy"
+    "deploy": "node scripts/wrangler-local.mjs deploy",
+    "dev": "node scripts/wrangler-local.mjs dev",
+    "db:monitor:local": "node scripts/wrangler-local.mjs d1 execute aistock --local --file=scripts/monitoring.sql",
+    "check": "npm run build && npm test",
+    "build:worker": "node scripts/wrangler-local.mjs deploy --dry-run --outdir .tmp/build",
+    "db:accounts:local": "node scripts/wrangler-local.mjs d1 execute aistock --local --file=scripts/users-schema.sql && node scripts/wrangler-local.mjs d1 execute aistock --local --file=scripts/user_settings.sql && node scripts/wrangler-local.mjs d1 execute aistock --local --file=scripts/accounts.sql"
   },
   "keywords": [],
   "author": "",
@@ -17,7 +22,12 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240117.0",
     "@types/node": "^25.2.1",
+    "esbuild": "0.27.0",
+    "miniflare": "4.20260205.0",
     "typescript": "^5.3.3",
     "wrangler": "^4.63.0"
+  },
+  "engines": {
+    "node": ">=22.13.0"
   }
 }

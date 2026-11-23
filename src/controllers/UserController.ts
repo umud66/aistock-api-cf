@@ -1,5 +1,5 @@
 import { createResponse } from '../utils/response';
-import { verifyJwt } from '../utils/jwt';
+import { authenticatedUser } from '../auth/security';
 import { isValidAShareSymbol } from '../utils/validator';
 import type { Env } from '../index';
 
@@ -14,13 +14,9 @@ export class UserController {
     }
 
     private static async requireAuth(request: Request, env: Env): Promise<{ ok: true; openid: string } | { ok: false; code: number; message: string }> {
-        const cookie = request.headers.get('Cookie') || '';
-        const tokenMatch = cookie.match(/(?:^|;\s*)token=([^;]+)/);
-        if (!tokenMatch) return { ok: false, code: 401, message: '未登录' };
-        const token = tokenMatch[1];
-        const payload = await verifyJwt(token, env.JWT_SECRET);
-        if (!payload) return { ok: false, code: 401, message: 'token 无效或已过期' };
-        return { ok: true, openid: payload.openid };
+        const id = await authenticatedUser(request, env);
+        if (!id) return { ok: false, code: 401, message: '未登录或会话已过期' };
+        return { ok: true, openid: id };
     }
 
     private static async extractSymbols(request: Request, allowQuery = true): Promise<string[]> {
@@ -61,7 +57,7 @@ export class UserController {
             .all();
 
         return createResponse(200, 'success', {
-            openid: user?.openid || openid,
+            id: user?.openid || openid,
             nickname: user?.nickname || '',
             avatar_url: user?.avatar_url || '',
             created_at: user?.created_at || null,
@@ -111,7 +107,7 @@ export class UserController {
         UserController.log('me', '✅ 返回用户信息', { openid: user.openid, nickname: user.nickname });
 
         return createResponse(200, 'success', {
-            openid: user.openid,
+            id: user.openid,
             nickname: user.nickname,
             avatar_url: user.avatar_url,
             created_at: user.created_at,
@@ -256,7 +252,7 @@ export class UserController {
             .all();
 
         return createResponse(200, 'success', {
-            openid,
+            id: openid,
             settings: (results || []).map((item: any) => ({
                 setting_type: item.setting_type,
                 enabled: Number(item.enabled) === 1,
@@ -329,7 +325,7 @@ export class UserController {
             .first<any>();
 
         return createResponse(200, 'success', {
-            openid,
+            id: openid,
             setting_type: updated?.setting_type || settingType,
             enabled: Number(updated?.enabled ?? enabledValue) === 1,
             updated_at: updated?.updated_at || null,

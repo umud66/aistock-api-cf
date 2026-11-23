@@ -25,8 +25,11 @@ export interface StockIdentity {
  * @param symbol 6位股票代码
  */
 export function getStockIdentity(symbol: string): StockIdentity {
+    if (/^(51|56|58)/.test(symbol)) return { market: 'sh', board: '场内ETF', eastmoneyId: 1 };
+    if (/^15/.test(symbol)) return { market: 'sz', board: '场内ETF', eastmoneyId: 0 };
+
     // 上海证券交易所
-    if (symbol.startsWith('600') || symbol.startsWith('601') || symbol.startsWith('603')) {
+    if (symbol.startsWith('600') || symbol.startsWith('601') || symbol.startsWith('603') || symbol.startsWith('605')) {
         return { market: 'sh', board: '沪市主板', eastmoneyId: 1 };
     }
     if (symbol.startsWith('688')) {
@@ -43,7 +46,7 @@ export function getStockIdentity(symbol: string): StockIdentity {
     if (symbol.startsWith('002') || symbol.startsWith('003')) {
         return { market: 'sz', board: '中小板', eastmoneyId: 0 };
     }
-    if (symbol.startsWith('300')) {
+    if (symbol.startsWith('300') || symbol.startsWith('301')) {
         return { market: 'sz', board: '创业板', eastmoneyId: 0 };
     }
     if (symbol.startsWith('200')) {

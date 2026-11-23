@@ -36,3 +36,9 @@ pnpm-debug.log*
 .DS_Store
 Thumbs.db
 scripts/users.sql
+
+.dev.vars
+.dev.vars.*
+
+# Task caches, test runtime and build previews stay inside this repository.
+.tmp/

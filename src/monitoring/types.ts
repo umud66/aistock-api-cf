@@ -4,6 +4,7 @@ export interface MonitorEnv {
     MONITOR_ENABLED?: string;
     MONITOR_WEBHOOK_URL?: string;
     MONITOR_WEBHOOK_TOKEN?: string;
+    AUTH_PASSWORD_PEPPER?: string;
 }
 export interface Instrument {
     symbol: string;

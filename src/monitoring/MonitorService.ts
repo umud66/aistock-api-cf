@@ -4,8 +4,10 @@ import { evaluateRule } from './RuleEngine';
 import { deliverEvents } from './Webhook';
 import { isAShareTradingTime } from '../utils/tradingTime';
 import type { Evaluation, MonitorEnv } from './types';
+import { runtimeEnv } from './RuntimeSettings';
 
 export async function runMonitor(env: MonitorEnv, now = Date.now()): Promise<void> {
+    env = await runtimeEnv(env);
     if (env.MONITOR_ENABLED !== 'true') return;
     const repository = new MonitorRepository(env.DB);
     const owner = crypto.randomUUID();

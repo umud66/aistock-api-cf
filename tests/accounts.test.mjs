@@ -31,7 +31,7 @@ export default {async fetch(request,env) {
     ({AccountRepository}=await import(`data:text/javascript;base64,${Buffer.from(repo.outputFiles[0].text).toString('base64')}`));
 });
 beforeEach(async()=>{
-    await db.batch(['DELETE FROM users','DELETE FROM auth_rate_limits',"UPDATE system_settings SET allow_registration=0,updated_at=0"].map(s=>db.prepare(s)));
+    await db.batch(['DELETE FROM users','DELETE FROM auth_rate_limits','DELETE FROM admin_sessions','DELETE FROM monitor_settings',"UPDATE system_settings SET allow_registration=0,updated_at=0"].map(s=>db.prepare(s)));
 });
 after(async()=>{await mf?.dispose();});
 function request(path,method='GET',body,options={}) {
@@ -142,4 +142,29 @@ test('login throttles atomically by account even when source IP changes',async()
     assert.equal((await request('/api/auth/login','POST',{username:'tester',password},{headers:{'CF-Connecting-IP':'192.0.2.99'}})).status,429);
     await db.prepare('UPDATE auth_rate_limits SET window_start=0').run();
     assert.equal((await login()).response.status,200);
+});
+test('browser admin login exchanges the secret for a revocable HttpOnly session',async()=>{
+    assert.equal((await request('/api/admin/login','POST',{token:'wrong'})).status,401);
+    const response=await request('/api/admin/login','POST',{token:admin});
+    assert.equal(response.status,200);
+    const setCookie=response.headers.get('Set-Cookie');assert.ok(setCookie.includes('__Host-stockwatch_admin='));
+    assert.ok(setCookie.includes('HttpOnly'));assert.ok(setCookie.includes('Secure'));
+    const cookie=setCookie.split(';')[0];
+    assert.equal((await request('/api/admin/settings','PUT',{allow_registration:true},{cookie})).status,200);
+    assert.equal((await request('/api/admin/settings','PUT',{allow_registration:false},{cookie,headers:{Origin:'https://evil.test'}})).status,403);
+    const stored=await db.prepare('SELECT * FROM admin_sessions').first();
+    assert.ok(!JSON.stringify(stored).includes(admin));assert.notEqual(stored.token_hash,cookie.split('=')[1]);
+    assert.equal((await request('/api/admin/logout','POST',{}, {cookie})).status,200);
+    assert.equal((await request('/api/admin/me','GET',undefined,{cookie})).status,401);
+});
+test('runtime settings are editable in the UI API and webhook secrets stay encrypted',async()=>{
+    const saved=await request('/api/admin/runtime','PUT',{monitor_enabled:true,webhook_url:'https://hooks.company.com/private-path',webhook_token:'test-only-webhook-secret'},{admin:true});
+    assert.equal(saved.status,200);const data=(await saved.json()).data;
+    assert.equal(data.monitor_enabled,true);assert.equal(data.webhook_host,'hooks.company.com');
+    assert.ok(!JSON.stringify(data).includes('private-path'));assert.ok(!JSON.stringify(data).includes('test-only-webhook-secret'));
+    const row=await db.prepare('SELECT * FROM monitor_settings').first();
+    assert.ok(!JSON.stringify(row).includes('private-path'));assert.ok(!JSON.stringify(row).includes('test-only-webhook-secret'));
+    assert.equal((await request('/api/admin/runtime','PUT',{webhook_url:'http://127.0.0.1'},{admin:true})).status,400);
+    const read=(await (await request('/api/admin/runtime','GET',undefined,{admin:true})).json()).data;
+    assert.equal(read.webhook_token_configured,true);assert.equal(read.monitor_enabled,true);
 });

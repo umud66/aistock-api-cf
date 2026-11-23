@@ -43,6 +43,7 @@ import { isAShareTradingTime } from './utils/tradingTime';
  */
 
 export interface Env extends MonitorEnv {
+    ASSETS?: Fetcher;
     KV: KVNamespace;
     DB: D1Database;
     AUTH_PASSWORD_PEPPER?: string;
@@ -87,7 +88,8 @@ const queryRoutes: [string, QueryRouteHandler][] = [
     ['/api/users/me', UserController.me.bind(UserController)],
     ['/api/users/me/settings', UserController.getSettings.bind(UserController)],
     ['/api/users/me/news/push', UserController.getPushNews.bind(UserController)],
-    ['/api/users/me/favorites', UserController.addFavorites.bind(UserController)],
+    ['/api/users/me/favorites', (request, env) => request.method === 'DELETE'
+        ? UserController.removeFavorites(request, env) : UserController.addFavorites(request, env)],
     ['/api/users/me/favorites/delete', UserController.removeFavorites.bind(UserController)],
     ['/api/cn/market/stockrank', StockRankController.getHotRank.bind(StockRankController)],
     ['/api/cn/stocks', StockListController.getStockList.bind(StockListController)],
@@ -365,6 +367,18 @@ export default {
         try {
             const url = new URL(request.url);
             const { pathname } = url;
+            if (!pathname.startsWith('/api/')) {
+                if (!env.ASSETS) return createResponse(503,'页面资源尚未构建，请先构建前端');
+                const asset = await env.ASSETS.fetch(request);
+                const headers = new Headers(asset.headers);
+                headers.set('X-Content-Type-Options','nosniff');
+                headers.set('Referrer-Policy','same-origin');
+                if(headers.get('Content-Type')?.includes('text/html')) {
+                    headers.set('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'");
+                    headers.set('Cache-Control','no-cache');
+                }
+                return new Response(asset.body,{status:asset.status,headers});
+            }
             if (pathname.startsWith("/api/auth/") || pathname.startsWith("/api/admin/")) {
                 return withCors(await AccountController.handle(request, env), request, env);
             }

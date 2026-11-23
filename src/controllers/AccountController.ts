@@ -1,6 +1,7 @@
 import { AccountRepository } from '../auth/AccountRepository';
 import { hashPassword, verifyPassword } from '../auth/password';
-import { authenticatedUser, digest, isAdmin, SESSION_COOKIE, sessionToken, trustedOrigin } from '../auth/security';
+import { authenticatedUser, digest, isAdmin, ADMIN_COOKIE, SESSION_COOKIE, sessionToken, trustedOrigin } from '../auth/security';
+import { publicRuntime, saveRuntime } from '../monitoring/RuntimeSettings';
 import type { AccountEnv } from '../auth/security';
 import { createResponse } from '../utils/response';
 
@@ -43,9 +44,9 @@ function pepper(env: AccountEnv): string {
     if (!env.AUTH_PASSWORD_PEPPER || env.AUTH_PASSWORD_PEPPER.length<32) throw new AccountError(503,'账号服务尚未配置 AUTH_PASSWORD_PEPPER Secret');
     return env.AUTH_PASSWORD_PEPPER;
 }
-function withCookie(response: Response, token: string, maxAge: number): Response {
+function withCookie(response: Response, token: string, maxAge: number, name = SESSION_COOKIE): Response {
     const headers=new Headers(response.headers);
-    headers.set('Set-Cookie',`${SESSION_COOKIE}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`);
+    headers.set('Set-Cookie',`${name}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`);
     return new Response(response.body,{status:response.status,headers});
 }
 
@@ -61,8 +62,43 @@ export class AccountController {
         const repository=new AccountRepository(env.DB);
         try {
             if (!['GET','POST','PUT'].includes(request.method)) return createResponse(405,'Method Not Allowed');
-            if (path.startsWith('/api/admin/') && !await isAdmin(request,env)) return createResponse(401,'需要管理员 Bearer Token');
             if (request.method!=='GET' && !trustedOrigin(request,env)) return createResponse(403,'请求来源不受信任');
+            if (path.startsWith('/api/admin/') && !['/api/admin/login','/api/admin/logout'].includes(path) && !await isAdmin(request,env)) return createResponse(401,'请先登录管理员账号');
+            if (path==='/api/admin/login') {
+                if(request.method!=='POST') return createResponse(405,'仅支持 POST');
+                const client=await digest(request.headers.get('CF-Connecting-IP') ?? 'local');
+                if(!await repository.consumeLimit(`admin:ip:${client}`,10)) return createResponse(429,'尝试次数过多，请在 15 分钟后重试');
+                const input=await bodyOf(request);
+                if(typeof input.token!=='string' || input.token.length>512) return createResponse(401,'管理员密钥不正确');
+                const headers=new Headers(request.headers);headers.set('Authorization',`Bearer ${input.token}`);
+                if(!await isAdmin(new Request(request.url,{method:request.method,headers}),env)) return createResponse(401,'管理员密钥不正确');
+                const raw=Array.from(crypto.getRandomValues(new Uint8Array(32)),v=>v.toString(16).padStart(2,'0')).join('');
+                await env.DB.batch([
+                    env.DB.prepare('DELETE FROM admin_sessions WHERE expires_at<=?').bind(Date.now()),
+                    env.DB.prepare('INSERT INTO admin_sessions(token_hash,credential_hash,expires_at) VALUES(?,?,?)')
+                        .bind(await digest(raw),await digest(env.MONITOR_ADMIN_TOKEN!),Date.now()+8*3600_000),
+                ]);
+                return withCookie(createResponse(200,'管理员登录成功',{role:'admin'}),raw,8*3600,ADMIN_COOKIE);
+            }
+            if(path==='/api/admin/logout') {
+                if(request.method!=='POST') return createResponse(405,'仅支持 POST');
+                const raw=request.headers.get('Cookie')?.match(/(?:^|;\s*)__Host-stockwatch_admin=([a-f0-9]{64})(?:;|$)/)?.[1];
+                if(raw) await env.DB.prepare('DELETE FROM admin_sessions WHERE token_hash=?').bind(await digest(raw)).run();
+                return withCookie(createResponse(200,'已退出'),'',0,ADMIN_COOKIE);
+            }
+            if(path==='/api/admin/me' && request.method==='GET') return createResponse(200,'success',{role:'admin'});
+            if(path==='/api/admin/runtime') {
+                if(request.method==='GET') return createResponse(200,'success',await publicRuntime(env));
+                if(request.method==='PUT') {
+                    try {return createResponse(200,'运行设置已保存',await saveRuntime(env,await bodyOf(request)));}
+                    catch(error) {if(error instanceof AccountError) throw error;return createResponse(400,error instanceof Error?error.message:'设置保存失败');}
+                }
+                return createResponse(405,'仅支持 GET/PUT');
+            }
+            if(path==='/api/admin/users' && request.method==='GET') {
+                const result=await env.DB.prepare('SELECT c.user_id AS id,c.username,u.nickname,c.created_at FROM account_credentials c JOIN users u ON u.openid=c.user_id ORDER BY c.created_at DESC LIMIT 200').all();
+                return createResponse(200,'success',result.results);
+            }
             if (path==='/api/auth/config' && request.method==='GET') {
                 return createResponse(200,'success',{allow_registration:(await repository.settings()).allow_registration});
             }

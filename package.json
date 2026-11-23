@@ -5,26 +5,40 @@
   "main": "src/index.ts",
   "scripts": {
     "test": "node --import ./tests/setup.mjs --test tests/*.test.mjs",
-    "build": "echo 'Building not required for interpretion, but verifying types...' && tsc",
+    "build": "tsc && npm run build:ui",
     "deploy": "node scripts/wrangler-local.mjs deploy",
     "dev": "node scripts/wrangler-local.mjs dev",
-    "db:monitor:local": "node scripts/wrangler-local.mjs d1 execute aistock --local --file=scripts/monitoring.sql",
+    "db:monitor:local": "npm run db:local",
     "check": "npm run build && npm test",
-    "build:worker": "node scripts/wrangler-local.mjs deploy --dry-run --outdir .tmp/build",
-    "db:accounts:local": "node scripts/wrangler-local.mjs d1 execute aistock --local --file=scripts/users-schema.sql && node scripts/wrangler-local.mjs d1 execute aistock --local --file=scripts/user_settings.sql && node scripts/wrangler-local.mjs d1 execute aistock --local --file=scripts/accounts.sql"
+    "build:worker": "npm run build:ui && node scripts/wrangler-local.mjs deploy --dry-run --outdir .tmp/build",
+    "db:accounts:local": "npm run db:local",
+    "build:ui": "vue-tsc -p tsconfig.frontend.json && vite build",
+    "dev:ui": "vite",
+    "predeploy": "npm run build",
+    "test:ui": "node --import ./tests/setup.mjs --test tests/ui.e2e.mjs",
+    "predev": "npm run build:ui",
+    "db:local": "node scripts/wrangler-local.mjs d1 migrations apply DB --local",
+    "pretest:ui": "npm run build:worker"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "cheerio": "^1.2.0"
+    "cheerio": "^1.2.0",
+    "vue": "^3.5.46"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20240117.0",
+    "@playwright/test": "^1.65.1",
+    "@tailwindcss/vite": "^4.3.5",
     "@types/node": "^25.2.1",
+    "@vitejs/plugin-vue": "^6.0.11",
     "esbuild": "0.27.0",
     "miniflare": "4.20260205.0",
+    "tailwindcss": "^4.3.5",
     "typescript": "^5.3.3",
+    "vite": "^8.3.8",
+    "vue-tsc": "^3.3.14",
     "wrangler": "^4.63.0"
   },
   "engines": {

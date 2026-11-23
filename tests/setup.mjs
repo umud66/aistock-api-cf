@@ -7,3 +7,4 @@ process.env.TMPDIR = runtime;
 process.env.TMP = runtime;
 process.env.TEMP = runtime;
 process.env.WRANGLER_LOG_PATH = resolve('.tmp/wrangler.log');
+process.env.PLAYWRIGHT_BROWSERS_PATH = resolve('.tmp/playwright-browsers');

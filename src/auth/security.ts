@@ -11,9 +11,19 @@ export async function digest(value: string): Promise<string> {
     return Array.from(bytes, v => v.toString(16).padStart(2, '0')).join('');
 }
 
-export async function isAdmin(request: Request, env: Pick<AccountEnv, 'MONITOR_ADMIN_TOKEN'>): Promise<boolean> {
+export const ADMIN_COOKIE = '__Host-stockwatch_admin';
+export async function isAdmin(request: Request, env: Pick<AccountEnv, 'MONITOR_ADMIN_TOKEN'> & {DB?:D1Database}): Promise<boolean> {
     const token = request.headers.get('Authorization')?.match(/^Bearer (.+)$/)?.[1];
-    if (!token || token.length > 512 || !env.MONITOR_ADMIN_TOKEN || env.MONITOR_ADMIN_TOKEN.length < 32) return false;
+    if (!env.MONITOR_ADMIN_TOKEN || env.MONITOR_ADMIN_TOKEN.length < 32) return false;
+    if (!token) {
+        const cookie = request.headers.get('Cookie')?.match(/(?:^|;\s*)__Host-stockwatch_admin=([a-f0-9]{64})(?:;|$)/)?.[1];
+        if (!cookie || !env.DB) return false;
+        if (!['GET','HEAD','OPTIONS'].includes(request.method) && !trustedOrigin(request,env as AccountEnv)) return false;
+        const row = await env.DB.prepare('SELECT token_hash FROM admin_sessions WHERE token_hash=? AND credential_hash=? AND expires_at>?')
+            .bind(await digest(cookie),await digest(env.MONITOR_ADMIN_TOKEN),Date.now()).first();
+        return !!row;
+    }
+    if (token.length > 512) return false;
     const a = await digest(token), b = await digest(env.MONITOR_ADMIN_TOKEN);
     let difference = 0;
     for (let i = 0; i < a.length; i++) difference |= a.charCodeAt(i) ^ b.charCodeAt(i);

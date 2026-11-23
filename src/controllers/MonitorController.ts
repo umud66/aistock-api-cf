@@ -1,4 +1,5 @@
 import { isAdmin } from '../auth/security';
+import { runtimeEnv } from '../monitoring/RuntimeSettings';
 import { createResponse } from '../utils/response';
 import { MonitorRepository } from '../monitoring/MonitorRepository';
 import { fetchMonitorQuotes } from '../monitoring/QuoteProvider';
@@ -36,6 +37,7 @@ export class MonitorController {
         const repository = new MonitorRepository(env.DB);
         let lockOwner: string | null = null;
         try {
+            env = await runtimeEnv(env);
             if (!['GET', 'POST', 'PUT', 'DELETE'].includes(request.method)) return createResponse(405, 'Method Not Allowed');
             if (request.method !== 'GET') {
                 lockOwner = crypto.randomUUID();
@@ -124,8 +126,15 @@ export class MonitorController {
                 const rows = await env.DB.prepare('SELECT * FROM monitor_events ORDER BY created_at DESC,id LIMIT 50 OFFSET ?').bind((page-1)*50).all();
                 return createResponse(200,'success',{page,page_size:50,events:rows.results});
             }
+            const retryMatch = path.match(/^\/api\/monitor\/events\/([^/]+)\/retry$/);
+            if (retryMatch && request.method === 'POST') {
+                const id = decodeURIComponent(retryMatch[1]);
+                check(id.length<=128,'无效事件编号');
+                const row = await env.DB.prepare("UPDATE monitor_events SET status='pending',attempts=0,next_attempt_at=0,lease_owner=NULL,lease_until=0,last_error=NULL WHERE id=? AND status='failed' RETURNING id").bind(id).first();
+                return createResponse(row ? 202 : 409,row ? '通知已重新排队' : '该通知不存在或不处于失败状态');
+            }
             if (path === '/api/monitor/webhook/test' && request.method === 'POST') {
-                check(env.MONITOR_ENABLED === 'true', '请先启用 MONITOR_ENABLED，Cron 才能发送测试通知');
+                check(env.MONITOR_ENABLED === 'true', '请先在系统设置中开启自动监控，测试通知将在下一轮检查中发送');
                 check(env.MONITOR_WEBHOOK_URL,'尚未配置 Webhook Secret');
                 validateWebhookUrl(env.MONITOR_WEBHOOK_URL);
                 const id = `test:${crypto.randomUUID()}`;

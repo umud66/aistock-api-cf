@@ -64,3 +64,9 @@ CREATE TABLE IF NOT EXISTS monitor_runs (
     error TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_monitor_runs_started ON monitor_runs(started_at);
+CREATE TABLE IF NOT EXISTS monitor_settings (
+    id INTEGER PRIMARY KEY CHECK(id=1),
+    monitor_enabled INTEGER CHECK(monitor_enabled IN (0,1)),
+    webhook_url TEXT,
+    webhook_token TEXT
+);

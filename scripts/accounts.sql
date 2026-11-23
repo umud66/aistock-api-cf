@@ -21,3 +21,9 @@ CREATE TABLE IF NOT EXISTS auth_rate_limits (
     window_start INTEGER NOT NULL,
     attempts INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS admin_sessions (
+    token_hash TEXT PRIMARY KEY,
+    credential_hash TEXT NOT NULL,
+    expires_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_admin_sessions_expires ON admin_sessions(expires_at);

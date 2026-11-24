@@ -28,6 +28,7 @@ export class EmKlineService {
     };
 
     private static toNumber(value: string): number | null {
+        if (!value.trim() || value === '-') return null;
         const num = Number(value);
         return Number.isFinite(num) ? num : null;
     }
@@ -84,6 +85,7 @@ export class EmKlineService {
         const response = await fetch(url.toString(), {
             method: 'GET',
             headers: this.HEADERS,
+            signal: AbortSignal.timeout(10_000),
         });
 
         if (!response.ok) {

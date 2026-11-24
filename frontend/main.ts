@@ -1,6 +1,7 @@
 import { createApp } from 'vue';
 import App from './App.vue';
 import './style.css';
+import './research.css';
 
 let stored: string|null = null;
 try {stored=localStorage.getItem('stockwatch-theme');} catch { /* Theme preferences are optional. */ }

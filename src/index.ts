@@ -1,4 +1,6 @@
 import { MonitorController } from './controllers/MonitorController';
+import { ResearchController } from './controllers/ResearchController';
+import type { AiEnvironment } from './services/WorkersAiService';
 import { ensureSchema, SchemaMigrationError } from './db/schema';
 import { runMonitor } from './monitoring/MonitorService';
 import type { MonitorEnv } from './monitoring/types';
@@ -43,7 +45,7 @@ import { isAShareTradingTime } from './utils/tradingTime';
  * - utils/          通用工具（响应、校验、解析、日期）
  */
 
-export interface Env extends MonitorEnv {
+export interface Env extends MonitorEnv, AiEnvironment {
     ASSETS?: Fetcher;
     KV: KVNamespace;
     DB: D1Database;
@@ -53,7 +55,6 @@ export interface Env extends MonitorEnv {
     CORS_ALLOW_ORIGIN: string;
     OPENAI_API_BASE_URL: string;
     OPENAI_API_KEY: string;
-    EVA_MODEL: string;
     OCR_MODEL: string;
     CRON_HOT_TOPN?: string;
     CRON_ANALYSIS_CONCURRENCY?: string;
@@ -266,6 +267,7 @@ async function warmupHotStockInfos(env: Env): Promise<void> {
 }
 
 async function refreshFavoritesStockAnalysis(env: Env): Promise<void> {
+    if(!env.AI){console.log('[Cron][FavoritesAnalysis] skip: AI binding is missing');return;}
     const inTradingTime = await isAShareTradingTime();
     if (!inTradingTime) {
         console.log('[Cron][FavoritesAnalysis] skip: not in A-share trading time');
@@ -382,6 +384,9 @@ export default {
                 return new Response(asset.body,{status:asset.status,headers});
             }
             await ensureSchema(env.DB);
+            if (pathname.startsWith('/api/research/')) {
+                return withCors(await ResearchController.handle(request, env), request, env);
+            }
             if (pathname.startsWith("/api/auth/") || pathname.startsWith("/api/admin/")) {
                 return withCors(await AccountController.handle(request, env), request, env);
             }

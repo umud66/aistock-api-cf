@@ -1,6 +1,7 @@
 import type { MonitorEnv } from './types';
 import { validateWebhookUrl } from './Webhook';
 import { applicationSecret } from '../auth/applicationSecret';
+import {aiModel,type AiEnvironment} from '../services/WorkersAiService';
 
 async function key(env: MonitorEnv): Promise<CryptoKey> {
     const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`stockwatch:settings:${await applicationSecret(env)}`));
@@ -36,11 +37,11 @@ export async function runtimeEnv(env: MonitorEnv): Promise<MonitorEnv> {
         MONITOR_WEBHOOK_TOKEN:row?.webhook_token ? await open(row.webhook_token,env) : undefined,
     };
 }
-export async function publicRuntime(env: MonitorEnv) {
+export async function publicRuntime(env: MonitorEnv & AiEnvironment) {
     const current = await runtimeEnv(env);
     let host = '';
     try {host = current.MONITOR_WEBHOOK_URL ? new URL(current.MONITOR_WEBHOOK_URL).hostname : '';} catch { /* Invalid URL is shown as unconfigured. */ }
-    return {monitor_enabled:(env.MONITOR_USER_ID ? current.MONITOR_USER_ENABLED : current.MONITOR_ENABLED)==='true',system_enabled:current.MONITOR_SERVICE_ENABLED==='true',webhook_configured:!!host,webhook_host:host,
+    return {ai_available:!!env.AI,ai_model:aiModel(env),monitor_enabled:(env.MONITOR_USER_ID ? current.MONITOR_USER_ENABLED : current.MONITOR_ENABLED)==='true',system_enabled:current.MONITOR_SERVICE_ENABLED==='true',webhook_configured:!!host,webhook_host:host,
         webhook_token_configured:!!current.MONITOR_WEBHOOK_TOKEN,source:'东方财富',interval_seconds:60,max_instruments:100,max_rules:200};
 }
 export async function saveRuntime(env: MonitorEnv, input: Record<string,unknown>) {

@@ -1,6 +1,8 @@
 import type { Env } from '../index';
 import { StockAnalysisService } from '../services/StockAnalysisService';
 import { createResponse } from '../utils/response';
+import { authenticatedUser } from '../auth/security';
+import { AccountRepository } from '../auth/AccountRepository';
 
 /**
  * 个股 AI 评价控制器
@@ -108,6 +110,10 @@ export class StockAnalysisController {
         }
 
         if (request.method === 'POST') {
+            const userId=await authenticatedUser(request,env);
+            if(!userId)return createResponse(401,'请先登录用户账号');
+            if(!env.AI)return createResponse(503,'请在 Cloudflare 的 Bindings 中添加名为 AI 的 Workers AI 绑定');
+            if(!await new AccountRepository(env.DB).consumeLimit(`research:${userId}`,12))return createResponse(429,'每 15 分钟最多生成 12 次分析，请稍后再试');
             if (this.isSseRequested(request)) {
                 return this.createStockAnalysisSseResponse(symbol, env);
             }

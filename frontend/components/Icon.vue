@@ -1,6 +1,8 @@
 <script setup lang="ts">
 withDefaults(defineProps<{name:string;size?:number}>(),{size:20});
 const paths:Record<string,string>={
+    chart:'M3 3v18h18M7 7v9M5 10h4v4H5M13 4v11M11 6h4v6h-4M19 9v9M17 12h4v4h-4',
+    spark:'M12 3l2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z',
     overview:'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',
     stocks:'M4 5h16M4 12h16M4 19h16M8 3v4M16 10v4M11 17v4',
     rules:'M5 3v18M12 3v18M19 3v18M2 8h6M9 16h6M16 7h6',

@@ -3,7 +3,7 @@ import type { MonitorEnv } from './types';
 
 export function validateWebhookUrl(value: string): URL {
     const url = new URL(value);
-    // Restrict to public DNS hostnames; destination is administrator-controlled Secret.
+    // Each authenticated user configures their own public HTTPS destination.
     if (url.protocol !== 'https:' || url.username || url.password || (url.port && url.port !== '443') ||
         !/^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/i.test(url.hostname) ||
         /(?:^|\.)(localhost|local|internal|test|invalid|example|home|lan|arpa)$/.test(url.hostname) ||
@@ -14,9 +14,9 @@ export function validateWebhookUrl(value: string): URL {
 }
 
 export async function deliverEvents(env: MonitorEnv, now: number, fetcher: typeof fetch = fetch) {
-    if (!env.MONITOR_WEBHOOK_URL) return;
+    if (!env.MONITOR_USER_ID || !env.MONITOR_WEBHOOK_URL) return;
     const url = validateWebhookUrl(env.MONITOR_WEBHOOK_URL);
-    const repository = new MonitorRepository(env.DB);
+    const repository = new MonitorRepository(env.DB,env.MONITOR_USER_ID);
     const owner = crypto.randomUUID();
     const events = await repository.claimEvents(owner, now);
     for (const event of events) {

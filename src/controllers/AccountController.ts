@@ -48,6 +48,10 @@ async function pepper(env: AccountEnv): Promise<string> {
 function withCookie(response: Response, token: string, maxAge: number, name = SESSION_COOKIE): Response {
     const headers=new Headers(response.headers);
     headers.set('Set-Cookie',`${name}=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`);
+    if(maxAge>0) {
+        const other=name===ADMIN_COOKIE ? SESSION_COOKIE : ADMIN_COOKIE;
+        headers.append('Set-Cookie',`${other}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`);
+    }
     return new Response(response.body,{status:response.status,headers});
 }
 

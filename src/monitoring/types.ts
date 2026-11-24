@@ -1,5 +1,9 @@
 export interface MonitorEnv {
     DB: D1Database;
+    /** Internal context assigned from an authenticated session or the scheduler. */
+    MONITOR_USER_ID?: string;
+    MONITOR_SERVICE_ENABLED?: string;
+    MONITOR_USER_ENABLED?: string;
     KV?: KVNamespace;
     ADMIN_PASSWORD?: string;
     MONITOR_ENABLED?: string;

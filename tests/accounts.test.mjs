@@ -16,7 +16,7 @@ export default {async fetch(request,env) {
  const path=new URL(request.url).pathname;
  if(path.startsWith('/api/auth/')||path.startsWith('/api/admin/')) return AccountController.handle(request,env);
  if(path==='/api/users/me') return UserController.me(request,env);
- if(path==='/api/monitor/status') return MonitorController.handle(request,env);
+ if(path.startsWith('/api/monitor/')) return MonitorController.handle(request,env);
  return new Response('Not Found',{status:404});
 }};`},bundle:true,write:false,format:'esm',platform:'browser'});
     mf=new Miniflare({modules:true,script:built.outputFiles[0].text,d1Databases:['DB'],
@@ -26,6 +26,8 @@ export default {async fetch(request,env) {
         const sql=readFileSync('scripts/'+file,'utf8').replace(/^--.*$/gm,'').split(';').map(s=>s.trim()).filter(Boolean);
         for(let i=0;i<2;i++) await db.batch(sql.map(s=>db.prepare(s)));
     }
+    const personalSql=readFileSync('migrations/0004_user_owned_monitoring.sql','utf8').replace(/^--.*$/gm,'').split(';').map(s=>s.trim()).filter(Boolean);
+    await db.batch(personalSql.map(sql=>db.prepare(sql)));
     await db.prepare('CREATE TABLE stocks(symbol TEXT PRIMARY KEY,name TEXT,market TEXT)').run();
     const helpers=await build({stdin:{contents: `export * from './src/auth/applicationSecret';export * from './src/controllers/AccountController';export * from './src/monitoring/RuntimeSettings';export * from './src/auth/security';`,resolveDir:process.cwd(),loader:'ts'},bundle:true,write:false,format:'esm',platform:'browser'});
     cryptoApi=await import(`data:text/javascript;base64,${Buffer.from(helpers.outputFiles[0].text).toString('base64')}`);
@@ -82,7 +84,7 @@ test('admin can provision while closed; public account can login but never admin
     const legacy=await request('/api/users/me','GET',undefined,{cookie});
     assert.equal(legacy.status,200);assert.equal((await legacy.json()).data.id,user.id);
     assert.equal((await request('/api/admin/settings','PUT',{allow_registration:true},{cookie})).status,401);
-    assert.equal((await request('/api/monitor/status','GET',undefined,{cookie})).status,401);
+    assert.equal((await request('/api/monitor/status','GET',undefined,{cookie})).status,200);
     assert.equal((await request('/api/auth/register','POST',{username:'other',password})).status,403);
 });
 test('password hashes have unique salts and no plaintext; session storage holds only digests',async()=>{
@@ -164,20 +166,23 @@ test('an eight-character admin password works with only ADMIN_PASSWORD configure
     assert.equal((await request('/api/admin/logout','POST',{}, {cookie})).status,200);
     assert.equal((await request('/api/admin/me','GET',undefined,{cookie})).status,401);
 });
-test('runtime settings are editable in the UI API and webhook secrets stay encrypted',async()=>{
-    const saved=await request('/api/admin/runtime','PUT',{monitor_enabled:true,webhook_url:'https://hooks.company.com/private-path',webhook_token:'test-only-webhook-secret'},{admin:true});
+test('users own encrypted notification settings while admins only configure the system',async()=>{
+    await create();const {cookie}=await login();
+    const saved=await request('/api/monitor/runtime','PUT',{monitor_enabled:true,webhook_url:'https://hooks.company.com/private-path',webhook_token:'test-only-webhook-secret'},{cookie});
     assert.equal(saved.status,200);const data=(await saved.json()).data;
     assert.equal(data.monitor_enabled,true);assert.equal(data.webhook_host,'hooks.company.com');
     assert.ok(!JSON.stringify(data).includes('private-path'));assert.ok(!JSON.stringify(data).includes('test-only-webhook-secret'));
-    const row=await db.prepare('SELECT * FROM monitor_settings').first();
+    const row=await db.prepare('SELECT * FROM user_monitor_settings').first();
     assert.ok(!JSON.stringify(row).includes('private-path'));assert.ok(!JSON.stringify(row).includes('test-only-webhook-secret'));
     assert.equal((await request('/api/admin/runtime','PUT',{webhook_url:'http://127.0.0.1'},{admin:true})).status,400);
-    const read=(await (await request('/api/admin/runtime','GET',undefined,{admin:true})).json()).data;
+    assert.equal((await request('/api/admin/runtime','PUT',{webhook_url:'https://hooks.company.com/admin'},{admin:true})).status,400);
+    const read=(await (await request('/api/monitor/runtime','GET',undefined,{cookie})).json()).data;
     assert.equal(read.webhook_token_configured,true);assert.equal(read.monitor_enabled,true);
 });
 test('changing the administrator password revokes admin sessions without breaking user passwords or encrypted settings',async()=>{
-    await create('stableuser');
-    await request('/api/admin/runtime','PUT',{webhook_url:'https://hooks.company.com/stable',webhook_token:'stable-token'},{admin:true});
+    const user=await create('stableuser');
+    const {cookie}=await login('stableuser');
+    await request('/api/monitor/runtime','PUT',{webhook_url:'https://hooks.company.com/stable',webhook_token:'stable-token'},{cookie});
     const oldCookie=adminCookie;
     const rotated={DB:db,KV:await mf.getKVNamespace('KV'),ADMIN_PASSWORD:'new-pass'};
     const req=(path,method='GET',body,cookie)=>new Request('https://app.stockwatch.test'+path,{method,
@@ -189,7 +194,7 @@ test('changing the administrator password revokes admin sessions without breakin
     const newCookie=adminResponse.headers.get('Set-Cookie').split(';')[0];
     assert.equal((await cryptoApi.AccountController.handle(req('/api/admin/runtime','GET',undefined,newCookie),rotated)).status,200);
     assert.equal((await cryptoApi.AccountController.handle(req('/api/auth/login','POST',{username:'stableuser',password}),rotated)).status,200);
-    const current=await cryptoApi.runtimeEnv(rotated);assert.equal(current.MONITOR_WEBHOOK_TOKEN,'stable-token');
+    const current=await cryptoApi.runtimeEnv({...rotated,MONITOR_USER_ID:user.id});assert.equal(current.MONITOR_WEBHOOK_TOKEN,'stable-token');
     assert.equal(rotated.AUTH_PASSWORD_PEPPER,undefined);
 });
 test('legacy Bearer tokens cannot administer the application or log into the website',async()=>{

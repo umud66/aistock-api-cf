@@ -1,5 +1,5 @@
-import { isAdmin } from '../auth/security';
-import { runtimeEnv } from '../monitoring/RuntimeSettings';
+import { authenticatedUser } from '../auth/security';
+import { runtimeEnv, publicRuntime, saveRuntime } from '../monitoring/RuntimeSettings';
 import { createResponse } from '../utils/response';
 import { MonitorRepository } from '../monitoring/MonitorRepository';
 import { fetchMonitorQuotes } from '../monitoring/QuoteProvider';
@@ -32,11 +32,28 @@ async function bodyOf(request: Request): Promise<Record<string, unknown>> {
 
 export class MonitorController {
     static async handle(request: Request, env: MonitorEnv): Promise<Response> {
-        if (!await isAdmin(request, env)) return createResponse(401, '请先登录管理员账号');
+        const response=await this.dispatch(request,env);
+        const headers=new Headers(response.headers);
+        headers.set('Cache-Control','no-store');
+        return new Response(response.body,{status:response.status,headers});
+    }
+    private static async dispatch(request: Request, env: MonitorEnv): Promise<Response> {
+        const userId = await authenticatedUser(request, env);
+        if (!userId) return createResponse(401, '请先登录用户账号');
+        env = {...env, MONITOR_USER_ID:userId};
         const path = new URL(request.url).pathname.replace(/\/$/, '');
-        const repository = new MonitorRepository(env.DB);
+        const repository = new MonitorRepository(env.DB,userId);
         let lockOwner: string | null = null;
         try {
+            if (path === '/api/monitor/runtime') {
+                if (request.method === 'GET') return createResponse(200,'success',await publicRuntime(env));
+                if (request.method === 'PUT') {
+                    const input=await bodyOf(request);
+                    try { return createResponse(200,'个人监控设置已保存',await saveRuntime(env,input)); }
+                    catch(error) { throw new InputError(error instanceof Error ? error.message : '设置保存失败'); }
+                }
+                return createResponse(405,'仅支持 GET/PUT');
+            }
             env = await runtimeEnv(env);
             if (!['GET', 'POST', 'PUT', 'DELETE'].includes(request.method)) return createResponse(405, 'Method Not Allowed');
             if (request.method !== 'GET') {
@@ -47,14 +64,14 @@ export class MonitorController {
                 }
             }
             if (path === '/api/monitor/status' && request.method === 'GET') {
-                const runs = await env.DB.prepare('SELECT * FROM monitor_runs ORDER BY started_at DESC LIMIT 10').all();
-                const counts = await env.DB.prepare('SELECT status,COUNT(*) AS count FROM monitor_events GROUP BY status').all();
-                return createResponse(200, 'success', { enabled: env.MONITOR_ENABLED === 'true',
+                const runs = await env.DB.prepare('SELECT * FROM user_monitor_runs WHERE user_id=? ORDER BY started_at DESC LIMIT 10').bind(userId).all();
+                const counts = await env.DB.prepare('SELECT status,COUNT(*) AS count FROM user_monitor_events WHERE user_id=? GROUP BY status').bind(userId).all();
+                return createResponse(200, 'success', { enabled: env.MONITOR_ENABLED === 'true', system_enabled: env.MONITOR_SERVICE_ENABLED === 'true', personal_enabled: env.MONITOR_USER_ENABLED === 'true',
                     webhook_configured: !!env.MONITOR_WEBHOOK_URL, source: 'eastmoney', runs: runs.results, notifications: counts.results });
             }
             if (path === '/api/monitor/instruments') {
                 if (request.method === 'GET') {
-                    const quotes = await env.DB.prepare('SELECT market,symbol,payload,received_at FROM monitor_quotes').all<{market:string;symbol:string;payload:string;received_at:number}>();
+                    const quotes = await env.DB.prepare('SELECT market,symbol,payload,received_at FROM user_monitor_quotes WHERE user_id=?').bind(userId).all<{market:string;symbol:string;payload:string;received_at:number}>();
                     const byKey = new Map(quotes.results.map(q => [`${q.market}:${q.symbol}`, {
                         ...JSON.parse(q.payload), received_at: q.received_at,
                         stale: Date.now() - JSON.parse(q.payload).sourceTime > 120_000,
@@ -64,10 +81,10 @@ export class MonitorController {
                 if (request.method === 'POST') {
                     const b = await bodyOf(request);
                     const item = this.instrument(b);
-                    const result = await env.DB.prepare(`INSERT INTO monitor_instruments(symbol,market,name,kind,enabled)
-                        SELECT ?,?,?,?,? WHERE (SELECT COUNT(*) FROM monitor_instruments)<100
-                        ON CONFLICT(market,symbol) DO NOTHING RETURNING symbol`)
-                        .bind(item.symbol,item.market,item.name,item.kind,item.enabled).first();
+                    const result = await env.DB.prepare(`INSERT INTO user_monitor_instruments(user_id,symbol,market,name,kind,enabled)
+                        SELECT ?,?,?,?,?,? WHERE (SELECT COUNT(*) FROM user_monitor_instruments WHERE user_id=?)<100
+                        ON CONFLICT(user_id,market,symbol) DO NOTHING RETURNING symbol`)
+                        .bind(userId,item.symbol,item.market,item.name,item.kind,item.enabled,userId).first();
                     return result ? createResponse(201, '已添加', item) : createResponse(409, '标的已存在或已达到 100 只上限');
                 }
                 return createResponse(405, '仅支持 GET/POST');
@@ -76,15 +93,15 @@ export class MonitorController {
             if (instrumentMatch) {
                 const [, market, symbol] = instrumentMatch;
                 if (request.method === 'DELETE') {
-                    const result = await env.DB.prepare('DELETE FROM monitor_instruments WHERE market=? AND symbol=? RETURNING symbol').bind(market,symbol).first();
+                    const result = await env.DB.prepare('DELETE FROM user_monitor_instruments WHERE user_id=? AND market=? AND symbol=? RETURNING symbol').bind(userId,market,symbol).first();
                     return createResponse(result ? 200 : 404, result ? '已删除标的及其规则' : '标的不存在');
                 }
                 if (request.method === 'PUT') {
-                    const existing = await env.DB.prepare('SELECT * FROM monitor_instruments WHERE market=? AND symbol=?').bind(market,symbol).first<Instrument>();
+                    const existing = await env.DB.prepare('SELECT * FROM user_monitor_instruments WHERE user_id=? AND market=? AND symbol=?').bind(userId,market,symbol).first<Instrument>();
                     if (!existing) return createResponse(404,'标的不存在');
                     const b = await bodyOf(request);
                     const item = this.instrument({ ...existing, enabled: !!existing.enabled, ...b, market, symbol });
-                    await env.DB.prepare('UPDATE monitor_instruments SET name=?,kind=?,enabled=? WHERE market=? AND symbol=?').bind(item.name,item.kind,item.enabled,market,symbol).run();
+                    await env.DB.prepare('UPDATE user_monitor_instruments SET name=?,kind=?,enabled=? WHERE user_id=? AND market=? AND symbol=?').bind(item.name,item.kind,item.enabled,userId,market,symbol).run();
                     return createResponse(200,'已更新',item);
                 }
                 return createResponse(405,'仅支持 PUT/DELETE');
@@ -93,7 +110,7 @@ export class MonitorController {
             const ruleMatch = path.match(/^\/api\/monitor\/rules\/([a-f0-9-]{36})$/);
             if (path === '/api/monitor/rules' && request.method === 'POST' || ruleMatch && request.method === 'PUT') {
                 const id = ruleMatch ? ruleMatch[1] : crypto.randomUUID();
-                const old = ruleMatch ? await env.DB.prepare('SELECT * FROM monitor_rules WHERE id=?').bind(id).first<Rule>() : null;
+                const old = ruleMatch ? await env.DB.prepare('SELECT * FROM user_monitor_rules WHERE user_id=? AND id=?').bind(userId,id).first<Rule>() : null;
                 if (ruleMatch && !old) return createResponse(404,'规则不存在');
                 const b = { ...(old ? { ...old, enabled: !!old.enabled, auto_disable: !!old.auto_disable } : {}), ...await bodyOf(request) };
                 check(typeof b.symbol === 'string' && /^\d{6}$/.test(b.symbol) && ['SH','SZ'].includes(String(b.market)), '需要有效 symbol 和 market');
@@ -103,44 +120,44 @@ export class MonitorController {
                 const cooldown = integer(b.cooldown_seconds,300,60,86400);
                 const dailyLimit = integer(b.daily_limit,3,1,100);
                 const enabled = flag(b.enabled), autoDisable = flag(b.auto_disable,0);
-                check(await env.DB.prepare('SELECT symbol FROM monitor_instruments WHERE market=? AND symbol=?').bind(b.market,b.symbol).first(), '请先添加监控标的');
+                check(await env.DB.prepare('SELECT symbol FROM user_monitor_instruments WHERE user_id=? AND market=? AND symbol=?').bind(userId,b.market,b.symbol).first(), '请先添加监控标的');
                 if (!old) {
-                    const result = await env.DB.prepare(`INSERT INTO monitor_rules(id,symbol,market,metric,operator,threshold,cooldown_seconds,daily_limit,auto_disable,enabled)
-                        SELECT ?,?,?,?,?,?,?,?,?,? WHERE (SELECT COUNT(*) FROM monitor_rules)<200 RETURNING id`)
-                        .bind(id,b.symbol,b.market,b.metric,b.operator,b.threshold,cooldown,dailyLimit,autoDisable,enabled).first();
+                    const result = await env.DB.prepare(`INSERT INTO user_monitor_rules(user_id,id,symbol,market,metric,operator,threshold,cooldown_seconds,daily_limit,auto_disable,enabled)
+                        SELECT ?,?,?,?,?,?,?,?,?,?,? WHERE (SELECT COUNT(*) FROM user_monitor_rules WHERE user_id=?)<200 RETURNING id`)
+                        .bind(userId,id,b.symbol,b.market,b.metric,b.operator,b.threshold,cooldown,dailyLimit,autoDisable,enabled,userId).first();
                     if (!result) return createResponse(409,'最多支持 200 条规则');
                 } else {
-                    await env.DB.prepare(`UPDATE monitor_rules SET symbol=?,market=?,metric=?,operator=?,threshold=?,cooldown_seconds=?,daily_limit=?,auto_disable=?,enabled=?,previous_value=NULL,previous_time=NULL WHERE id=?`)
-                        .bind(b.symbol,b.market,b.metric,b.operator,b.threshold,cooldown,dailyLimit,autoDisable,enabled,id).run();
+                    await env.DB.prepare(`UPDATE user_monitor_rules SET symbol=?,market=?,metric=?,operator=?,threshold=?,cooldown_seconds=?,daily_limit=?,auto_disable=?,enabled=?,previous_value=NULL,previous_time=NULL WHERE user_id=? AND id=?`)
+                        .bind(b.symbol,b.market,b.metric,b.operator,b.threshold,cooldown,dailyLimit,autoDisable,enabled,userId,id).run();
                 }
                 return createResponse(old ? 200 : 201,'规则已保存', { id });
             }
             if (ruleMatch && request.method === 'DELETE') {
-                const row = await env.DB.prepare('DELETE FROM monitor_rules WHERE id=? RETURNING id').bind(ruleMatch[1]).first();
+                const row = await env.DB.prepare('DELETE FROM user_monitor_rules WHERE user_id=? AND id=? RETURNING id').bind(userId,ruleMatch[1]).first();
                 return createResponse(row ? 200 : 404,row ? '已删除' : '规则不存在');
             }
             if (path === '/api/monitor/events' && request.method === 'GET') {
                 const url = new URL(request.url);
                 const page = Number(url.searchParams.get('page') || 1);
                 check(Number.isSafeInteger(page) && page >= 1 && page <= 10000,'page 范围为 1–10000');
-                const rows = await env.DB.prepare('SELECT * FROM monitor_events ORDER BY created_at DESC,id LIMIT 50 OFFSET ?').bind((page-1)*50).all();
+                const rows = await env.DB.prepare('SELECT * FROM user_monitor_events WHERE user_id=? ORDER BY created_at DESC,id LIMIT 50 OFFSET ?').bind(userId,(page-1)*50).all();
                 return createResponse(200,'success',{page,page_size:50,events:rows.results});
             }
             const retryMatch = path.match(/^\/api\/monitor\/events\/([^/]+)\/retry$/);
             if (retryMatch && request.method === 'POST') {
                 const id = decodeURIComponent(retryMatch[1]);
                 check(id.length<=128,'无效事件编号');
-                const row = await env.DB.prepare("UPDATE monitor_events SET status='pending',attempts=0,next_attempt_at=0,lease_owner=NULL,lease_until=0,last_error=NULL WHERE id=? AND status='failed' RETURNING id").bind(id).first();
+                const row = await env.DB.prepare("UPDATE user_monitor_events SET status='pending',attempts=0,next_attempt_at=0,lease_owner=NULL,lease_until=0,last_error=NULL WHERE user_id=? AND id=? AND status='failed' RETURNING id").bind(userId,id).first();
                 return createResponse(row ? 202 : 409,row ? '通知已重新排队' : '该通知不存在或不处于失败状态');
             }
             if (path === '/api/monitor/webhook/test' && request.method === 'POST') {
-                check(env.MONITOR_ENABLED === 'true', '请先在系统设置中开启自动监控，测试通知将在下一轮检查中发送');
-                check(env.MONITOR_WEBHOOK_URL,'尚未配置 Webhook Secret');
+                check(env.MONITOR_ENABLED === 'true', '请先开启个人监控，并确认全站监控服务已启用，测试通知将在下一轮检查中发送');
+                check(env.MONITOR_WEBHOOK_URL,'尚未配置个人通知渠道');
                 validateWebhookUrl(env.MONITOR_WEBHOOK_URL);
                 const id = `test:${crypto.randomUUID()}`;
                 const now = Date.now();
-                await env.DB.prepare('INSERT INTO monitor_events(id,payload,created_at) VALUES(?,?,?)')
-                    .bind(id,JSON.stringify({event:'stockwatch.test',event_id:id,timestamp:new Date(now).toISOString()}),now).run();
+                await env.DB.prepare('INSERT INTO user_monitor_events(user_id,id,payload,created_at) VALUES(?,?,?,?)')
+                    .bind(userId,id,JSON.stringify({event:'stockwatch.test',event_id:id,timestamp:new Date(now).toISOString()}),now).run();
                 return createResponse(202,'已排队，将由下一轮 Cron 发送',{id});
             }
             if (path === '/api/monitor/probe' && request.method === 'POST') {
